@@ -34,16 +34,23 @@ stages:
               rm -f install-opentofu.sh
             displayName: Install OpenTofu
 
+          - task: DownloadSecureFile@1
+            name: tfCert
+            displayName: 'Download Terraform Service Principal certificate'
+            inputs:
+              secureFile: 'tf-cert.pfx'
+
           - script: |
               terragrunt plan -out ../tfplan
             displayName: Terragrunt Plan
             workingDirectory: $(baseDir)
             env:
               ARM_CLIENT_ID: $(servicePrincipalUsername)
-              ARM_CLIENT_SECRET: $(servicePrincipalSecret)
               ARM_TENANT_ID: $(servicePrincipalTenantId)
               ARM_SUBSCRIPTION_ID: $(subscriptionId)
               AZDO_ORG_SERVICE_URL: $(System.CollectionUri)
+              ARM_CLIENT_CERTIFICATE_PATH: $(tfCert.secureFilePath)
+              ARM_CLIENT_CERTIFICATE_PASSWORD: $(servicePrincipalCertificatePassword)
 
           - publish: tfplan
             artifact: tfplan
@@ -96,13 +103,20 @@ stages:
               mv $(Pipeline.Workspace)/tfplan/tfplan $(baseDir)/tfplan
             displayName: Move Plan Artifact to Src Directory
 
+          - task: DownloadSecureFile@1
+            name: tfCert
+            displayName: 'Download Terraform Service Principal certificate'
+            inputs:
+              secureFile: 'tf-cert.pfx'
+
           - script: |
               terragrunt apply tfplan
             displayName: Terragrunt Apply
             workingDirectory: $(baseDir)
             env:
               ARM_CLIENT_ID: $(servicePrincipalUsername)
-              ARM_CLIENT_SECRET: $(servicePrincipalSecret)
               ARM_TENANT_ID: $(servicePrincipalTenantId)
               ARM_SUBSCRIPTION_ID: $(subscriptionId)
               AZDO_ORG_SERVICE_URL: $(System.CollectionUri)
+              ARM_CLIENT_CERTIFICATE_PATH: $(tfCert.secureFilePath)
+              ARM_CLIENT_CERTIFICATE_PASSWORD: $(servicePrincipalCertificatePassword)
