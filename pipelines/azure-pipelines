@@ -1,0 +1,108 @@
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: azure-variables
+  - name: baseDir
+    value: terragrunt
+
+stages:
+  - stage: plan_stage
+    displayName: Plan
+    jobs:
+      - job: plan_job
+        displayName: Plan
+        steps:
+          - checkout: self
+
+          - script: |
+              curl --proto '=https' --tlsv1.2 -fsSL -o terragrunt_linux_amd64 https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
+              chmod +x terragrunt_linux_amd64
+              sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
+            displayName: Install Terragrunt
+
+          - script: |
+              curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+              chmod +x install-opentofu.sh
+              ./install-opentofu.sh --install-method deb
+              rm -f install-opentofu.sh
+            displayName: Install OpenTofu
+
+          - script: |
+              terragrunt plan -out ../tfplan
+            displayName: Terragrunt Plan
+            workingDirectory: $(baseDir)
+            env:
+              ARM_CLIENT_ID: $(servicePrincipalUsername)
+              ARM_CLIENT_SECRET: $(servicePrincipalSecret)
+              ARM_TENANT_ID: $(servicePrincipalTenantId)
+              ARM_SUBSCRIPTION_ID: $(subscriptionId)
+              AZDO_ORG_SERVICE_URL: $(System.CollectionUri)
+
+          - publish: tfplan
+            artifact: tfplan
+            displayName: Publish Plan Artifact
+
+  - stage: approval_stage
+    displayName: Approval
+    dependsOn: plan_stage
+    condition: succeeded('plan_stage')
+    jobs:
+      - job: approval_job
+        displayName: Approval
+        pool: server
+        steps:
+          - task: ManualValidation@1
+            displayName: Manual Approval
+            timeoutInMinutes: 5
+            inputs:
+              instructions: 'Approve to apply the plan. This will auto-reject after 5 minutes.'
+              notifyUsers: ''
+
+  - stage: apply_stage
+    displayName: Apply
+    dependsOn: approval_stage
+    condition: succeeded('approval_stage')
+    jobs:
+      - job: apply_job
+        displayName: Apply
+        steps:
+          - checkout: self
+
+          - script: |
+              curl --proto '=https' --tlsv1.2 -fsSL -o terragrunt_linux_amd64 https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
+              chmod +x terragrunt_linux_amd64
+              sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
+            displayName: Install Terragrunt
+
+          - script: |
+              curl --proto '=https' --tlsv1.2 -fsSL -o install-opentofu.sh https://get.opentofu.org/install-opentofu.sh
+              chmod +x install-opentofu.sh
+              ./install-opentofu.sh --install-method deb
+              rm -f install-opentofu.sh
+            displayName: Install OpenTofu
+
+          - download: current
+            artifact: tfplan
+            displayName: Download Plan Artifact
+
+          - script: |
+              mv $(Pipeline.Workspace)/tfplan/tfplan $(baseDir)/tfplan
+            displayName: Move Plan Artifact to Src Directory
+
+          - script: |
+              terragrunt apply tfplan
+            displayName: Terragrunt Apply
+            workingDirectory: $(baseDir)
+            env:
+              ARM_CLIENT_ID: $(servicePrincipalUsername)
+              ARM_CLIENT_SECRET: $(servicePrincipalSecret)
+              ARM_TENANT_ID: $(servicePrincipalTenantId)
+              ARM_SUBSCRIPTION_ID: $(subscriptionId)
+              AZDO_ORG_SERVICE_URL: $(System.CollectionUri)
